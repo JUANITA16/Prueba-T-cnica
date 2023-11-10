@@ -1,0 +1,32 @@
+
+    .cuadro{
+        text-align: center;
+        border: 1px solid #000000ee;
+        margin: 3% 0% 5% 5% ;
+        height: 40vh;
+        width: 13%;
+        display: inline-block;
+        background-color: #000000f5;
+    }
+
+    .cuadrotitle{
+        text-decoration: none;
+        margin-top: 25%;
+        color: white;
+    }
+    .cuadroimg{
+        width: 100%;
+        height: 85%;
+    
+    }
+    .tituloimg{
+        color: #fff;
+        z-index: 1;
+        position: absolute;
+        margin-top: 7%;
+        margin-left: 2%;
+    }
+
+
+
+    
