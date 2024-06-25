@@ -1,0 +1,315 @@
+import json
+import datetime
+import psycopg2
+
+from pydantic import BaseModel
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+
+from src.config.env import URL_INTEGRATION, PATH_DOMINUS_CLIENTS, SECRET_DBOZONO_CREDENTIALS, SECRET_APIKEY_INTEGRATION
+from src.config.logger import logger
+from src.utils import utils
+
+router = APIRouter()
+
+class Cliente(BaseModel):
+    docClient: str
+    idTypeClient: str
+    nombres: str
+    apellidos: str
+    cuentaInversionista: str
+    usuario: str
+    creationDate: str
+    verificationNum: str
+
+
+@router.post("")
+def insert_cliente(item: Cliente):
+    logger.info("#INICIO insert_cliente")
+    try:
+        credentials = utils.get_secret_value(SECRET_DBOZONO_CREDENTIALS)
+        credentials = json.loads(credentials)
+        logger.info('Se obtuvo el secreto correctamente')
+
+        conn = psycopg2.connect(**credentials)
+        logger.info('Conexión exitosa')
+        try:
+            cur = conn.cursor()
+
+            table_clientes = "flujos_cdt.tblclientes"
+
+            docClient = item.docClient
+            idTypeClient = item.idTypeClient
+            nombres = item.nombres
+            apellidos = item.apellidos
+            cuentaInversionista = item.cuentaInversionista
+            usuario = item.usuario
+            verificationNum = item.verificationNum
+            creationDate = datetime.datetime.now().strftime('%d/%m/%Y-%H:%M:%S')
+            nombreFinal = apellidos + " " + nombres
+            docFinal = docClient + verificationNum
+
+            values_cliente = (docFinal, idTypeClient, cuentaInversionista, usuario, creationDate, nombreFinal)
+
+            insert_cliente = f''' 
+                INSERT INTO {table_clientes} (docclient, idtypeclient, cuentainversionista, usuario, creationdate, nombres)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            '''
+
+            cur.execute(insert_cliente, values_cliente)
+
+            conn.commit()
+            content = {"message": 'Proceso de inserción exitoso'}
+            status_code = 200
+
+        except Exception as e:
+            logger.error(f"Error ejecutando la query PostgreSQL: {str(e)}")
+            content = {
+                "message": f'Ocurrió un error en la función insert_cliente. Error: {str(e)}'
+            }
+            logger.info(content)
+            status_code = 500
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+                logger.info("Conexión a PostgreSQL cerrada")
+    except Exception as e:
+        logger.error(f'Ocurrió un error conectando a la BD: {str(e)}')
+        content = {
+            "message": f'Ocurrió un error en la función insert_cliente. Error: {str(e)}'
+        }
+        logger.info(content)
+        status_code = 500
+
+    logger.info("### FIN insert_cliente ###")
+
+    return JSONResponse(content=content, status_code=status_code)
+
+
+@router.get("")
+def get_clientes():
+    logger.info("#INICIO get_clientes")
+    try:
+        credentials = utils.get_secret_value(SECRET_DBOZONO_CREDENTIALS)
+        credentials = json.loads(credentials)
+        logger.info('Se obtuvo el secreto correctamente')
+
+        conn = psycopg2.connect(**credentials)
+        logger.info('Conexión exitosa')
+        try:
+            logger.info("Inicio ejecución ")
+
+            cur = conn.cursor()
+
+            table_clientes = "flujos_cdt.tblclientes"
+
+            select_query = f"SELECT * FROM {table_clientes}"
+
+            cur.execute(select_query)
+
+            logger.info("Query ejecutada")
+
+            content = []
+            rows = cur.fetchall()
+
+            logger.info(rows)
+
+            content, status_code = format_client(rows)
+
+        except Exception as e:
+            logger.error(f"Error ejecutando la query PostgreSQL: {str(e)}")
+            content = {
+                "message": f'Ocurrió un error en la función get_clientes. Error: {str(e)}'
+            }
+            logger.info(content)
+            status_code = 500
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+                logger.info("Conexión a PostgreSQL cerrada")
+    except Exception as e:
+        logger.error(f'Ocurrió un error conectando a la BD: {str(e)}')
+        content = {
+            "message": f'Ocurrió un error en la función get_clientes. Error: {str(e)}'
+        }
+        logger.info(content)
+        status_code = 500
+
+    logger.info("### FIN get_clientes ###")
+
+    return JSONResponse(content=content, status_code=status_code)
+
+
+@router.get("/id")
+def find_cliente(id: str, doc_type: str, vNum: str):
+    logger.info("#INICIO find_clientes")
+    try:
+        credentials = utils.get_secret_value(SECRET_DBOZONO_CREDENTIALS)
+        credentials = json.loads(credentials)
+        logger.info('Se obtuvo el secreto correctamente')
+
+        conn = psycopg2.connect(**credentials)
+        logger.info('Conexión exitosa')
+        try:
+            logger.info("Inicio ejecución ")
+
+            cur = conn.cursor()
+
+            table_clientes = "flujos_cdt.tblclientes"
+
+            if doc_type == 'NIT':
+                select_query = f"SELECT * FROM {table_clientes} WHERE idtypeclient = %s AND docclient LIKE %s AND docclient LIKE %s"
+                cur.execute(select_query, (doc_type, f'{id}%', f'%{vNum}'))
+            else:
+                select_query = f"SELECT * FROM {table_clientes} WHERE docclient = %s AND idtypeclient = %s"
+                cur.execute(select_query, (id, doc_type))
+
+            logger.info("Query ejecutada")
+
+            content = []
+            rows = cur.fetchall()
+
+            logger.info(rows)
+
+            content, status_code = format_client(rows)
+
+            if not rows:
+                id = id + vNum
+                content, status_code = find_cliente_dominus(id, doc_type)
+
+        except Exception as e:
+            logger.error(f"Error ejecutando la query PostgreSQL: {str(e)}")
+            content = {
+                "message": f'Ocurrió un error en la función find_clientes. Error: {str(e)}'
+            }
+            logger.info(content)
+            status_code = 500
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+                logger.info("Conexión a PostgreSQL cerrada")
+    except Exception as e:
+        logger.error(f'Ocurrió un error conectando a la BD: {str(e)}')
+        content = {
+            "message": f'Ocurrió un error en la función find_clientes. Error: {str(e)}'
+        }
+        logger.info(content)
+        status_code = 500
+
+    logger.info("### FIN find_clientes ###")
+
+    return JSONResponse(content=content, status_code=status_code)
+
+
+@router.delete("")
+def delete_clientes(id: str, doc_type: str):
+    logger.info("#INICIO delete_clientes")
+    try:
+        credentials = utils.get_secret_value(SECRET_DBOZONO_CREDENTIALS)
+        credentials = json.loads(credentials)
+        logger.info('Se obtuvo el secreto correctamente')
+
+        conn = psycopg2.connect(**credentials)
+        logger.info('Conexión exitosa')
+        try:
+            cur = conn.cursor()
+
+            table_clientes = "flujos_cdt.tblclientes"
+
+            query = f"DELETE FROM {table_clientes} WHERE docclient = %s AND idtypeclient = %s"
+
+            logger.info("Statement to execute: " + query)
+
+            cur.execute(query, (id, doc_type))
+
+            conn.commit()
+
+            content = {"message": 'Proceso de eliminación exitoso'}
+            status_code = 200
+
+        except Exception as e:
+            logger.error(f"Error ejecutando la query PostgreSQL: {str(e)}")
+            content = {
+                "message": f'Ocurrió un error en la función delete_clientes. Error: {str(e)}'
+            }
+            logger.info(content)
+            status_code = 500
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+                logger.info("Conexión a PostgreSQL cerrada")
+    except Exception as e:
+        logger.error(f'Ocurrió un error conectando a la BD: {str(e)}')
+        content = {
+            "message": f'Ocurrió un error en la función delete_clientes. Error: {str(e)}'
+        }
+        logger.info(content)
+        status_code = 500
+
+    logger.info("### FIN delete_clientes ###")
+    return JSONResponse(content=content, status_code=status_code)
+
+
+@router.put("")
+def update_clientes(item: Cliente, prev_doc: str):
+    logger.info("#INICIO update_clientes")
+    try:
+        credentials = utils.get_secret_value(SECRET_DBOZONO_CREDENTIALS)
+        credentials = json.loads(credentials)
+        logger.info('Se obtuvo el secreto correctamente')
+
+        conn = psycopg2.connect(**credentials)
+
+        logger.info('Conexión exitosa')
+        try:
+            cur = conn.cursor()
+
+            docClient = item.docClient
+            idTypeClient = item.idTypeClient
+            nombres = item.nombres
+            cuenta = item.cuentaInversionista
+            if not item.verificationNum or item.verificationNum == "None":
+                table_client
+table_clientes = "flujos_cdt.tblclientes"
+
+                update_query = f''' 
+                    UPDATE {table_clientes} 
+                    SET docclient = %s, idtypeclient = %s, nombres = %s, cuentainversionista = %s
+                    WHERE docclient = %s
+                '''
+                values_update = (docClient, idTypeClient, nombres, cuenta, prev_doc)
+
+                cur.execute(update_query, values_update)
+
+                conn.commit()
+
+                content = {"message": 'Proceso de actualización exitoso'}
+                status_code = 200
+
+            except Exception as e:
+                logger.error(f"Error ejecutando la query PostgreSQL: {str(e)}")
+                content = {
+                    "message": f'Ocurrió un error en la función update_clientes. Error: {str(e)}'
+                }
+                logger.info(content)
+                status_code = 500
+            finally:
+                if conn:
+                    cur.close()
+                    conn.close()
+                    logger.info("Conexión a PostgreSQL cerrada")
+        except Exception as e:
+            logger.error(f'Ocurrió un error conectando a la BD: {str(e)}')
+            content = {
+                "message": f'Ocurrió un error en la función update_clientes. Error: {str(e)}'
+            }
+            logger.info(content)
+            status_code = 500
+
+    logger.info("### FIN update_clientes ###")
+
+    return JSONResponse(content=content, status_code=status_code)
